@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Server;
 use App\Models\ServerRoute;
+use App\Models\ServerUser;
 use App\Models\User;
 use App\Services\Plugin\HookManager;
 use App\Utils\Helper;
@@ -11,43 +12,60 @@ use Illuminate\Support\Collection;
 
 class ServerService
 {
-
     /**
-     * 获取所有服务器列表
-     * @return Collection
+     * 获取所有服务器列表（附带专属分配用户 ID）
      */
     public static function getAllServers(): Collection
     {
-        $query = Server::orderBy('sort', 'ASC');
+        $servers = Server::orderBy('sort', 'ASC')
+            ->get()
+            ->append([
+                'last_check_at',
+                'last_push_at',
+                'online',
+                'is_online',
+                'available_status',
+                'cache_key',
+                'load_status',
+                'metrics',
+                'online_conn'
+            ]);
 
-        return $query->get()->append([
-            'last_check_at',
-            'last_push_at',
-            'online',
-            'is_online',
-            'available_status',
-            'cache_key',
-            'load_status',
-            'metrics',
-            'online_conn'
-        ]);
+        // 批量附加专属用户分配信息，避免 N+1
+        $assignMap = ServerUser::get(['server_id', 'user_id'])
+            ->groupBy('server_id')
+            ->map(fn($rows) => $rows->pluck('user_id')->toArray())
+            ->toArray();
+
+        return $servers->map(function ($server) use ($assignMap) {
+            $server->assigned_user_ids = $assignMap[$server->id] ?? [];
+            return $server;
+        });
     }
 
     /**
      * 获取指定用户可用的服务器列表
-     * @param User $user
-     * @return array
+     * 包含：所属分组的节点 + 专属分配给该用户的节点
      */
     public static function getAvailableServers(User $user): array
     {
-        $servers = Server::whereJsonContains('group_ids', (string) $user->group_id)
-            ->where('show', true)
+        // 一次性查出该用户的专属分配节点 ID，避免 N+1
+        $assignedServerIds = ServerUser::where('user_id', $user->id)
+            ->pluck('server_id')
+            ->toArray();
+
+        $servers = Server::where('show', true)
+            ->where(function ($query) use ($user, $assignedServerIds) {
+                $query->whereJsonContains('group_ids', (string) $user->group_id);
+                if (!empty($assignedServerIds)) {
+                    $query->orWhereIn('id', $assignedServerIds);
+                }
+            })
             ->orderBy('sort', 'ASC')
             ->get()
             ->append(['last_check_at', 'last_push_at', 'online', 'is_online', 'available_status', 'cache_key', 'server_key']);
 
         $servers = collect($servers)->map(function ($server) use ($user) {
-            // 判断动态端口
             if (str_contains($server->port, '-')) {
                 $port = $server->port;
                 $server->port = (int) Helper::randomPort($port);
@@ -64,14 +82,23 @@ class ServerService
     }
 
     /**
-     * 根据权限组获取可用的用户列表
-     * @param array $groupIds
-     * @return Collection
+     * 根据节点获取可用用户列表
+     * 包含：节点分组内的用户 + 专属分配给该节点的用户
      */
     public static function getAvailableUsers(Server $node)
     {
+        // 查出专属分配给该节点的用户 ID
+        $assignedUserIds = ServerUser::where('server_id', $node->id)
+            ->pluck('user_id')
+            ->toArray();
+
         $users = User::toBase()
-            ->whereIn('group_id', $node->group_ids)
+            ->where(function ($query) use ($node, $assignedUserIds) {
+                $query->whereIn('group_id', $node->group_ids ?? []);
+                if (!empty($assignedUserIds)) {
+                    $query->orWhereIn('id', $assignedUserIds);
+                }
+            })
             ->whereRaw('u + d < transfer_enable')
             ->where(function ($query) {
                 $query->where('expired_at', '>=', time())
@@ -85,6 +112,7 @@ class ServerService
                 'device_limit'
             ])
             ->get();
+
         return HookManager::filter('server.users.get', $users, $node);
     }
 
@@ -239,7 +267,6 @@ class ServerService
                 'server_port' => (int) $serverPort,
                 'transport' => data_get($protocolSettings, 'transport', 'TCP'),
                 'traffic_pattern' => $protocolSettings['traffic_pattern'],
-                // 'multiplex' => data_get($protocolSettings, 'multiplex'),
             ],
             default => [],
         };
@@ -270,9 +297,6 @@ class ServerService
 
     /**
      * 根据协议类型和标识获取服务器
-     * @param int $serverId
-     * @param string $serverType
-     * @return Server|null
      */
     public static function getServer($serverId, ?string $serverType)
     {
