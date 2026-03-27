@@ -6,6 +6,7 @@ use App\Http\Controllers\V2\Admin\PlanController;
 use App\Http\Controllers\V2\Admin\Server\GroupController;
 use App\Http\Controllers\V2\Admin\Server\RouteController;
 use App\Http\Controllers\V2\Admin\Server\ManageController;
+use App\Http\Controllers\V2\Admin\Server\UserAssignController;
 use App\Http\Controllers\V2\Admin\OrderController;
 use App\Http\Controllers\V2\Admin\UserController;
 use App\Http\Controllers\V2\Admin\StatController;
@@ -70,18 +71,20 @@ class AdminRoute
                 'prefix' => 'server/manage'
             ], function ($router) {
                 $router->get('/getNodes', [ManageController::class, 'getNodes']);
-                $router->post('/sort', [ManageController::class, 'sort']);
-            });
-
-            // 节点更新接口
-            $router->group([
-                'prefix' => 'server/manage'
-            ], function ($router) {
                 $router->post('/update', [ManageController::class, 'update']);
                 $router->post('/save', [ManageController::class, 'save']);
                 $router->post('/drop', [ManageController::class, 'drop']);
                 $router->post('/copy', [ManageController::class, 'copy']);
                 $router->post('/sort', [ManageController::class, 'sort']);
+            });
+
+            // User Assign（专属节点用户分配）
+            $router->group([
+                'prefix' => 'server/userAssign'
+            ], function ($router) {
+                $router->get('/fetch', [UserAssignController::class, 'fetch']);
+                $router->post('/save', [UserAssignController::class, 'save']);
+                $router->get('/searchUsers', [UserAssignController::class, 'searchUsers']);
             });
 
             // Order
@@ -163,24 +166,17 @@ class AdminRoute
             $router->group([
                 'prefix' => 'gift-card'
             ], function ($router) {
-                // Template management
                 $router->any('/templates', [GiftCardController::class, 'templates']);
                 $router->post('/create-template', [GiftCardController::class, 'createTemplate']);
                 $router->post('/update-template', [GiftCardController::class, 'updateTemplate']);
                 $router->post('/delete-template', [GiftCardController::class, 'deleteTemplate']);
-
-                // Code management
                 $router->post('/generate-codes', [GiftCardController::class, 'generateCodes']);
                 $router->any('/codes', [GiftCardController::class, 'codes']);
                 $router->post('/toggle-code', [GiftCardController::class, 'toggleCode']);
                 $router->get('/export-codes', [GiftCardController::class, 'exportCodes']);
                 $router->post('/update-code', [GiftCardController::class, 'updateCode']);
                 $router->post('/delete-code', [GiftCardController::class, 'deleteCode']);
-
-                // Usage records
                 $router->any('/usages', [GiftCardController::class, 'usages']);
-
-                // Statistics
                 $router->any('/statistics', [GiftCardController::class, 'statistics']);
                 $router->get('/types', [GiftCardController::class, 'types']);
             });
@@ -197,7 +193,7 @@ class AdminRoute
                 $router->post('/sort', [KnowledgeController::class, 'sort']);
             });
 
-            // Payment  
+            // Payment
             $router->group([
                 'prefix' => 'payment'
             ], function ($router) {
@@ -221,14 +217,6 @@ class AdminRoute
                 $router->get('/getHorizonFailedJobs', [SystemController::class, 'getHorizonFailedJobs']);
                 $router->any('/getAuditLog', [SystemController::class, 'getAuditLog']);
             });
-
-            // Update
-            // $router->group([
-            //     'prefix' => 'update'
-            // ], function ($router) {
-            //     $router->get('/check', [UpdateController::class, 'checkUpdate']);
-            //     $router->post('/execute', [UpdateController::class, 'executeUpdate']);
-            // });
 
             // Theme
             $router->group([
@@ -268,6 +256,5 @@ class AdminRoute
                 $router->post('reset-user', [TrafficResetController::class, 'resetUser']);
             });
         });
-
     }
 }
